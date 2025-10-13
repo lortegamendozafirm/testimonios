@@ -1,0 +1,84 @@
+googlerun/
+├─ .env
+├─ .gitignore
+├─ Dockerfile
+├─ LICENCE
+├─ Makefile
+├─ pyproject.toml
+├─ README.md
+├─ requirements.txt
+├─ requirements_test.txt
+├─ 
+│
+├─ src/
+│  ├─ ai/                               # conexión con los modelos LLM
+│  │  ├─ gemini.py                      # Punto de entrada FastAPI (Cloud Run)
+│  ├─ api/                              # 🌐 Capa API REST (FastAPI)
+│  │  ├─ main.py                        # Punto de entrada FastAPI (Cloud Run)
+│  │  ├─ routes/                        
+│  │  │   ├─ audio_pipeline.py          # Endpoint /process-audio
+│  │  │   └─ health.py                  # Endpoint /health
+│  │  └─ middleware/
+│  │      └─ error_handler.py           # Middleware global para logs y excepciones
+│  │
+│  ├─ domain/                           # 🧩 Entidades y schemas (Pydantic)
+│  │  ├─ schemas.py                     # Modelos de entrada/salida API (AudioRequest, AudioResponse, etc.)
+│  │  └─ prompts/
+│  │      ├─ transcription_prompt.md.j2 # Plantilla del prompt
+│  │      └─ report_prompt.md.j2        # (futuro) para análisis o reportes
+│  │
+│  ├─ ingestion/                        # 📥 Entrada de datos y descargas
+│  │  ├─ audio_loader.py                # (opcional) carga local / preprocesamiento
+│  │  ├─ audio_processor.py             # Normalización / conversión / chunking
+│  │  ├─ auth.py                        # Autenticación OAuth2 (Drive)
+│  │  ├─ auth_service.py                # Autenticación (service account)
+│  │  ├─ drive_loader.py                # Descarga de archivos desde Drive
+│  │  └─ google_auth_manager.py         # Gestiona el método de Autenticación
+│  │
+│  ├─ transcription/                    # 🗣️ Transcripción de audio
+│  │  ├─ gemini_transcriber.py          # Transcripción usando Gemini
+│  │  ├─ stt_vertex.py                  # Transcripción usando Speech-to-Text
+│  │  └─ diarization.py                 # (futuro) separación por hablante
+│  │
+│  ├─ llm/                              # 🧠 Clientes de modelos LLM (vía Vertex)
+│  │  ├─ base.py
+│  │  ├─ vertex_client.py
+│  │  ├─ claude_adapter.py
+│  │  └─ mistral_adapter.py
+│  │
+│  ├─ maintenance/                      #
+│  │  └─ limpia_drive.py                #
+│  │
+│  ├─ orchestration/                    # 🔄 Orquestación de flujos
+│  │  ├─ runner.py                      # Pipeline principal (usa audio_url en lugar de Sheets)
+│  │  └─ tasks.py                       # Subtareas (descarga, procesar, transcribir)
+│  │
+│  ├─ storage/                          # ☁️ Gestión de archivos
+│  │  ├─ audio_normalizer_service.py    # 
+│  │  ├─ drive_uploader.py              # 
+│  │  ├─ gcs_cleaner.py                 # 
+│  │  ├─ gcs_uploader.py                # 
+│  │  ├─ upload_service.py              # 
+│  │  └─ local.py                       # I/O local en /tmp
+│  │
+│  ├─ pdf/                              # 📄 Generación de informes (futuro)
+│  │  ├─ processor.py
+│  │  ├─ renderer.py
+│  │  ├─ styles.py
+│  │  └─ templates/
+│  │      └─ report.html.j2
+│  │
+│  ├─ logging_conf.py                   # Configuración de logging centralizada
+│  ├─ settings.py                       # Configuración global y lectura de .env
+│  └─ utils/                            # Funciones auxiliares (ej. timestamps, text cleaning)
+│
+├─ tests/
+│  ├─ test_auth.py
+│  ├─ test_runner_integration.py
+│  ├─ test_transcription_gemini.py
+│  └─ test_api_audio.py                 # Test real del endpoint /process-audio
+│
+└─ data/
+   ├─ input/
+   ├─ work/
+   └─ output/
