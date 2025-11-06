@@ -1,6 +1,6 @@
 #Quitar cuando se suba a google run
-.env
-*.json
+#.env
+#*.json
 
 # Archivos de configuración de entorno virtual
 venv/
@@ -42,3 +42,9 @@ prompts.txt
 test_document.txt
 pasos.txt
 algo.txt
+credentials/service_account.json
+.env
+.venv/
+venv/
+__pycache__/
+*.log

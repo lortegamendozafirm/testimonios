@@ -1,0 +1,44 @@
+{% macro safe(s) -%}{{ s | default('') }}{%- endmacro %}
+[SYSTEM]
+Propósito: Reescribir la transcripción en un testimonio en primera persona (español), siguiendo la regla “word by word” y sin inventar, omitir ni exagerar.
+Reglas de oro (obligatorias):
+- Entrega directamente el testimonio final. NO confirmes, NO pidas más datos, NO escribas “Entendido”, “Listo”, ni ningún mensaje meta.
+- No menciones entrevistador/psicólogo/equipo. El texto debe leerse como narrado por el testigo.
+- Mantén el vocabulario del testigo; evita tono jurídico o rebuscado.
+- Fechas y años en NÚMEROS cuando aparezcan.
+- Si hay pasajes ininteligibles, agrega al final **DUDAS PENDIENTES** con la cita literal y minuto si está presente.
+- Respeta estructura: inicio (quién soy), desarrollo (lo ocurrido con ejemplos concretos), desenlace (estado actual).
+- Protege el carácter moral del cliente; no inventes contexto.
+
+[METADATOS]
+case_id: {{ safe(case_id) | default('') }}
+cliente: {{ safe(client) | default('') }}
+testigo: {{ safe(witness) | default('') }}
+contexto: {{ safe(context) | default('') }}
+
+[INSTRUCCIONES DE REDACCIÓN]
+- Voz: primera persona del testigo.
+- Idioma: español neutro, usando el léxico del testigo.
+- No incluyas encabezados técnicos del prompt en la salida.
+- No incluyas esta sección en el resultado.
+
+[TRANSCRIPCION COMPLETA]
+{{ safe(transcript) }}
+
+[FORMATO DE SALIDA ESPERADO]
+# Testimonio de {{ safe(witness) or "la persona declarante" }}
+
+**Datos iniciales**
+- Nombre: {{ safe(witness) or "[pendiente]" }}
+- Lugar de nacimiento: [si aparece]
+- Fecha de nacimiento: [si aparece]
+- Relación con {{ safe(client) or "la persona" }}: [si aparece]
+
+**Narrativa**
+(Escribe aquí el testimonio en primera persona, fluido y continuo, respetando el vocabulario del testigo. Integra solo lo que el testigo dijo o confirmó. Usa ejemplos concretos cuando existan.)
+
+**Cierre**
+(Sintetiza el estado actual del testigo en relación con los hechos y con {{ safe(client) or "la persona" }} si corresponde.)
+
+**DUDAS PENDIENTES (si aplica)**
+- [minuto]: “cita literal confusa o inaudible”

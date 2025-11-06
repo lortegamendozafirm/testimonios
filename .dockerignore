@@ -1,0 +1,12 @@
+# Nunca hornees esto en la imagen
+.env
+credentials/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.cache/
+.git
+.gitignore
+.tests/
