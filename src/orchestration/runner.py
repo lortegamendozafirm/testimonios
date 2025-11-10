@@ -12,7 +12,7 @@ from src.logging_conf import get_logger
 from src.settings import get_settings
 from src.domain.schemas import TestimonyRequest, TestimonyResponse
 from src.clients.drive_client import assert_sa_has_access
-from src.clients.gdocs_client import get_document_content, write_to_document
+from src.clients.gdocs_client import get_document_content, write_to_document, write_markdown_to_document
 from src.clients.vertex_client import generate_text
 from src.auth import build_drive_client
 from src.domain.prompt_loader import render_testimony_prompt
@@ -75,6 +75,7 @@ def _fallback_prompt(transcript: str, req: TestimonyRequest, language: str) -> s
         - Idioma: español neutro, usando el léxico del testigo.
         - No incluyas encabezados técnicos del prompt en la salida.
         - No incluyas esta sección en el resultado.
+        - Evita muletillas. Evitar la repetición seguida de plabras, por ejemplo: "Trabajamos trabajamos", "parte del día estamos estamos juntos", "Fíjese que sí. Como como"
         """).strip()
 
         meta = dedent(f"""
@@ -209,7 +210,7 @@ def run_testimony(req: TestimonyRequest) -> Dict[str, Any]:
 
     # --- 3) Escribir en Doc de destino (overwrite) ---
     try:
-        write_to_document(target_doc_id, output_text)
+        write_markdown_to_document(target_doc_id, output_text)
     except Exception as e:
         raise _map_google_http_error(e, op="Escribir documento de salida (Docs)", file_id=target_doc_id)
 

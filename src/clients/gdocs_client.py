@@ -5,8 +5,11 @@ import random
 import socket
 import ssl
 import json
-from typing import Any, Dict, List, Optional, TypedDict, cast, Iterator
+import re
+
+from typing import Any, Dict, List, Optional, TypedDict, cast, Iterator, Tuple
 from http.client import IncompleteRead
+
 
 from googleapiclient.errors import HttpError
 from googleapiclient.http import HttpRequest
@@ -170,8 +173,6 @@ def _get_end_index(doc: Document) -> int:
 
 # ========= Operaciones de escritura =========
 
-# src/clients/gdocs_client.py
-
 def write_to_document(document_id: str, text: str) -> None:
     """
     Borra el contenido (sin tocar el newline final) e inserta `text` al inicio.
@@ -230,3 +231,293 @@ def write_to_document(document_id: str, text: str) -> None:
             start += MAX_CHARS
             part += 1
             time.sleep(0.15)  # ⬅️ 150ms para no “aplanar” el backend
+
+
+# ----------------------------
+# Utilidades de parsing simple
+# ----------------------------
+
+_BOLD_RE   = re.compile(r"\*\*(.+?)\*\*")
+_ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")  # evita **negritas**
+_LINK_RE   = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_HR_RE     = re.compile(r"^(\*\s*\*\s*\*|-{3,}|_{3,})\s*$")
+_ATX_H_RE  = re.compile(r"^(#{1,6})\s+(.*)$")
+_UL_RE     = re.compile(r"^(\s*)([-*+])\s+(.*)$")
+_OL_RE     = re.compile(r"^(\s*)(\d+)[.)]\s+(.*)$")
+_CODEFENCE_RE = re.compile(r"^```")
+
+# ----------------------------
+# Lotes para batchUpdate
+# ----------------------------
+
+def _flush_requests(docs, document_id: str, requests: List[Dict[str, Any]]):
+    if not requests:
+        return
+    body = {"requests": requests}
+    req: HttpRequest = docs.documents().batchUpdate(documentId=document_id, body=body)
+    _execute_with_retries(req)
+    requests.clear()
+
+# ----------------------------
+# Borrado seguro (conserva \n final)
+# ----------------------------
+
+def _clear_document_keep_trailing_newline(docs, document_id: str):
+    get_req: HttpRequest = docs.documents().get(documentId=document_id)
+    doc_raw: Optional[Dict[str, Any]] = _execute_with_retries(get_req)
+    doc = cast(Dict[str, Any], doc_raw)
+    end_index: int = _get_end_index(doc)
+    delete_end = max(1, end_index - 1)
+    if delete_end > 1:
+        del_req: HttpRequest = docs.documents().batchUpdate(
+            documentId=document_id,
+            body={
+                "requests": [
+                    {"deleteContentRange": {"range": {"startIndex": 1, "endIndex": delete_end}}}
+                ]
+            },
+        )
+        _execute_with_retries(del_req)
+    # devolvemos el índice actual para empezar a insertar
+    return 1  # insert at beginning
+
+# ----------------------------
+# Helpers de estilos inline
+# ----------------------------
+
+def _apply_inline_styles(docs, document_id: str, base_index: int, paragraph_text: str, requests: List[Dict[str, Any]]):
+    """
+    Aplica negritas, cursivas y links sobre el texto recién insertado.
+    base_index: índice de inicio del párrafo (en el doc) justo antes del insert de este párrafo.
+    Retorna length total del texto insertado (para avanzar el cursor).
+    """
+    # Primero convertimos [texto](url) a "texto" y guardamos rangos
+    link_spans: List[Tuple[int, int, str]] = []
+    out = []
+    i = 0
+    for m in _LINK_RE.finditer(paragraph_text):
+        start, end = m.span()
+        text_label, url = m.group(1), m.group(2)
+        # texto previo
+        out.append(paragraph_text[i:start])
+        # el texto visible
+        link_start = sum(len(x) for x in out)
+        out.append(text_label)
+        link_end = link_start + len(text_label)
+        link_spans.append((link_start, link_end, url))
+        i = end
+    out.append(paragraph_text[i:])
+    normalized = "".join(out)
+
+    # Detectamos negritas y cursivas sobre "normalized"
+    # Guardamos y luego quitamos los marcadores para calcular rangos limpios
+    spans_bold: List[Tuple[int,int]] = []
+    spans_italic: List[Tuple[int,int]] = []
+
+    def _collect_spans(pattern: re.Pattern, text: str) -> Tuple[str, List[Tuple[int,int]]]:
+        spans = []
+        result = []
+        shift = 0
+        last = 0
+        for m in pattern.finditer(text):
+            s, e = m.span()
+            content = m.group(1)
+            # previo
+            result.append(text[last:s])
+            start_idx = sum(len(x) for x in result)
+            result.append(content)
+            end_idx = start_idx + len(content)
+            spans.append((start_idx, end_idx))
+            last = e
+        result.append(text[last:])
+        return "".join(result), spans
+
+    normalized, spans_bold = _collect_spans(_BOLD_RE, normalized)
+    normalized, spans_italic = _collect_spans(_ITALIC_RE, normalized)
+
+    # Insertamos el texto ya limpio de marcadores + salto de línea
+    text_with_newline = normalized + "\n"
+    requests.append({"insertText": {"location": {"index": base_index}, "text": text_with_newline}})
+    # Rango del párrafo insertado (sin contar el \n al estilizar inline)
+    start_idx = base_index
+    end_idx = base_index + len(normalized)
+
+    # Links
+    for (ls, le, url) in link_spans:
+        requests.append({
+            "updateTextStyle": {
+                "range": {"startIndex": start_idx + ls, "endIndex": start_idx + le},
+                "textStyle": {"link": {"url": url}},
+                "fields": "link"
+            }
+        })
+
+    # Negritas
+    for (bs, be) in spans_bold:
+        requests.append({
+            "updateTextStyle": {
+                "range": {"startIndex": start_idx + bs, "endIndex": start_idx + be},
+                "textStyle": {"bold": True},
+                "fields": "bold"
+            }
+        })
+
+    # Cursivas
+    for (is_, ie) in spans_italic:
+        requests.append({
+            "updateTextStyle": {
+                "range": {"startIndex": start_idx + is_, "endIndex": start_idx + ie},
+                "textStyle": {"italic": True},
+                "fields": "italic"
+            }
+        })
+
+    # devolvemos el avance total (texto + \n)
+    return len(text_with_newline)
+
+# ----------------------------
+# Listas (bullets / números)
+# ----------------------------
+
+def _apply_list_bullets(requests: List[Dict[str, Any]], list_start_idx: int, list_end_idx: int, ordered: bool):
+    preset = "NUMBERED_DECIMAL_ALPHA_ROMAN" if ordered else "BULLET_DISC_CIRCLE_SQUARE"
+    requests.append({
+        "createParagraphBullets": {
+            "range": {"startIndex": list_start_idx, "endIndex": list_end_idx},
+            "bulletPreset": preset
+        }
+    })
+
+# ----------------------------
+# Encabezados
+# ----------------------------
+
+def _apply_heading_style(requests: List[Dict[str, Any]], start_idx: int, end_idx: int, level: int):
+    level = max(1, min(level, 6))
+    requests.append({
+        "updateParagraphStyle": {
+            "range": {"startIndex": start_idx, "endIndex": end_idx},
+            "paragraphStyle": {"namedStyleType": f"HEADING_{level}"},
+            "fields": "namedStyleType"
+        }
+    })
+
+# ----------------------------
+# Escribir Markdown → Google Doc
+# ----------------------------
+
+def write_markdown_to_document(document_id: str, markdown_text: str) -> None:
+    """
+    Convierte un subset útil de Markdown a formato nativo de Google Docs:
+    - #..###### → HEADING_X
+    - listas -,*,+ → bullets
+    - listas numeradas 1. 2. → numbered
+    - **bold**, *italic*, [link](url)
+    - --- / *** → horizontal rule
+    - párrafos normales
+    Maneja lotes y respeta newline terminal del doc.
+    """
+    docs = build_docs_client()
+    cursor = _clear_document_keep_trailing_newline(docs, document_id)
+
+    # Normalización básica
+    lines = markdown_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    requests: List[Dict[str, Any]] = []
+    batch_size = 0
+    BATCH_LIMIT = 180  # operaciones por flush (ajusta si hace falta)
+
+    i = 0
+    N = len(lines)
+
+    while i < N:
+        line = lines[i]
+
+        # 1) Regla horizontal
+        if _HR_RE.match(line.strip()):
+            requests.append({"insertHorizontalRule": {"location": {"index": cursor}}})
+            # \n de separación para que el siguiente párrafo no se pegue
+            requests.append({"insertText": {"location": {"index": cursor}}, "text": "\n"})
+            cursor += 1
+            batch_size += 2
+
+        # 2) Fenced code blocks: por simplicidad los pegamos como texto monoespaciado
+        elif _CODEFENCE_RE.match(line.strip()):
+            i += 1
+            code_lines = []
+            while i < N and not _CODEFENCE_RE.match(lines[i].strip()):
+                code_lines.append(lines[i])
+                i += 1
+            code_text = "\n".join(code_lines)
+
+            # Insertamos el bloque y luego aplicamos fuente monoespaciada
+            text_len = len(code_text) + 1  # +\n
+            requests.append({"insertText": {"location": {"index": cursor}, "text": code_text + "\n"}})
+            requests.append({
+                "updateTextStyle": {
+                    "range": {"startIndex": cursor, "endIndex": cursor + len(code_text)},
+                    "textStyle": {"weightedFontFamily": {"fontFamily": "Roboto Mono"}},
+                    "fields": "weightedFontFamily"
+                }
+            })
+            cursor += text_len
+            batch_size += 2
+
+        # 3) Encabezados ATX
+        elif (m := _ATX_H_RE.match(line)):
+            hashes, title = m.group(1), m.group(2).strip()
+            level = len(hashes)
+            # insert + estilo heading
+            inserted = _apply_inline_styles(docs, document_id, cursor, title, requests)
+            _apply_heading_style(requests, cursor, cursor + inserted - 1, level)  # -1 para no incluir \n
+            cursor += inserted
+            batch_size += 2 + 10  # aprox (inline styles generan varias ops)
+
+        # 4) Listas (bloque contiguo UL/OL)
+        elif _UL_RE.match(line) or _OL_RE.match(line):
+            # Detecta el bloque completo de lista
+            list_lines: List[Tuple[str, bool]] = []  # (texto, ordered?)
+            ordered_block = bool(_OL_RE.match(line))
+            j = i
+            while j < N and ( _UL_RE.match(lines[j]) or _OL_RE.match(lines[j]) ):
+                lm = _UL_RE.match(lines[j])
+                if lm:
+                    text_item = lm.group(3).strip()
+                    list_lines.append((text_item, False))
+                else:
+                    lm = _OL_RE.match(lines[j])
+                    text_item = lm.group(3).strip()
+                    list_lines.append((text_item, True))
+                j += 1
+
+            list_start_idx = cursor
+            # insertamos cada ítem como un párrafo (luego se convierte a bullet/numbered)
+            for (item_text, is_ordered) in list_lines:
+                inserted = _apply_inline_styles(docs, document_id, cursor, item_text, requests)
+                cursor += inserted
+                batch_size += 1 + 8  # aproximado
+                ordered_block = ordered_block or is_ordered
+
+            list_end_idx = cursor - 1  # antes del \n final del último item
+            _apply_list_bullets(requests, list_start_idx, list_end_idx, ordered=ordered_block)
+            batch_size += 1
+
+            i = j - 1  # -1 porque al final del loop haremos i += 1
+
+        # 5) Párrafo normal (incluye líneas vacías → saltos)
+        else:
+            text_line = line if line.strip() != "" else ""
+            inserted = _apply_inline_styles(docs, document_id, cursor, text_line, requests)
+            cursor += inserted
+            batch_size += 1 + 6  # aprox
+
+        # Flush si excede el límite
+        if batch_size >= BATCH_LIMIT:
+            _flush_requests(docs, document_id, requests)
+            batch_size = 0
+            time.sleep(0.1)
+
+        i += 1
+
+    # Flush final
+    _flush_requests(docs, document_id, requests)
+    logger.info("✅ Markdown renderizado con formato nativo de Google Docs.")
