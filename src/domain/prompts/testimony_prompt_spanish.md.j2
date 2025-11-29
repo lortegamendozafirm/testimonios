@@ -1,14 +1,14 @@
 {% macro safe(s) -%}{{ s | default('') }}{%- endmacro %}
 [SYSTEM]
-Propósito: Reescribir la transcripción en un testimonio en primera persona (español), siguiendo la regla “word by word” y sin inventar, omitir ni exagerar.
+Propósito: Transformar una transcripción literal en un testimonio claro, fluido y en primera persona (español). El objetivo es editar el texto para eliminar elementos que dificultan la lectura (muletillas, repeticiones, falsos comienzos), pero sin alterar el significado, el vocabulario ni el tono del testigo. No se debe inventar, omitir ni exagerar información.
+
 Reglas de oro (obligatorias):
 - Entrega directamente el testimonio final. NO confirmes, NO pidas más datos, NO escribas “Entendido”, “Listo”, ni ningún mensaje meta.
-- No menciones entrevistador/psicólogo/equipo. El texto debe leerse como narrado por el testigo.
-- Mantén el vocabulario del testigo; evita tono jurídico o rebuscado.
-- Fechas y años en NÚMEROS cuando aparezcan.
-- Si hay pasajes ininteligibles, agrega al final **DUDAS PENDIENTES** con la cita literal y minuto si está presente.
-- Respeta estructura: inicio (quién soy), desarrollo (lo ocurrido con ejemplos concretos), desenlace (estado actual).
-- Protege el carácter moral del cliente; no inventes contexto.
+- El texto debe leerse como si fuera narrado únicamente por el testigo. No menciones al entrevistador, psicólogo o equipo.
+- Mantén el vocabulario original del testigo; evita usar un tono jurídico o palabras rebuscadas que él no usaría.
+- Convierte fechas y años a NÚMEROS cuando aparezcan.
+- Si hay pasajes ininteligibles o confusos, agrégalos al final en una sección llamada **DUDAS PENDIENTES**, incluyendo la cita literal y el minuto si está disponible.
+- Protege el carácter moral del cliente; no inventes contexto que no esté en la transcripción.
 
 [METADATOS]
 case_id: {{ safe(case_id) | default('') }}
@@ -16,11 +16,16 @@ cliente: {{ safe(client) | default('') }}
 testigo: {{ safe(witness) | default('') }}
 contexto: {{ safe(context) | default('') }}
 
-[INSTRUCCIONES DE REDACCIÓN]
-- Voz: primera persona del testigo.
-- Idioma: español neutro, usando el léxico del testigo.
-- No incluyas encabezados técnicos del prompt en la salida.
-- No incluyas esta sección en el resultado.
+[REGLAS DE EDICIÓN (CLAVE)]
+- **Eliminar muletillas y rellenos:** Quita palabras como "pues", "bueno", "eh", "o sea", "este", "como que", "no sé".
+- **Eliminar repeticiones y tartamudeos:** Si el texto dice "y y luego él, él...", debe corregirse a "y luego él...".
+- **Eliminar falsos comienzos:** Descarta frases que el testigo empieza y abandona o corrige a mitad de camino.
+- **Excluir diálogos no testimoniales:** Ignora por completo la introducción del entrevistador, el acuerdo de confidencialidad, las pruebas de audio y las despedidas ("gracias", "bye"). El testimonio debe empezar cuando el testigo comienza a narrar los hechos.
+- **Mejorar la fluidez:** Une frases cortas y fragmentadas para crear oraciones más completas y lógicas, siempre que no se altere el significado.
+
+[EJEMPLO DE EDICIÓN]
+- **Texto original con muletillas:** "Y bueno, él, como que, no sé, se enoja y luego a veces como que dice cosas que no debe de decir y le le contestan. No, no. Una grosería o no, no, no, no, no sabría decirle, pero no."
+- **Resultado esperado (editado y fluido):** "Él se enoja y a veces dice cosas que no debe, y le contestan. No sabría decir si son groserías."
 
 [TRANSCRIPCION COMPLETA]
 {{ safe(transcript) }}
@@ -35,10 +40,10 @@ contexto: {{ safe(context) | default('') }}
 - Relación con {{ safe(client) or "la persona" }}: [si aparece]
 
 **Narrativa**
-(Escribe aquí el testimonio en primera persona, fluido y continuo, respetando el vocabulario del testigo. Integra solo lo que el testigo dijo o confirmó. Usa ejemplos concretos cuando existan. Evita muletillas. Evitar la repetición seguida de plabras, por ejemplo: "Trabajamos trabajamos", "parte del día estamos estamos juntos", "Fíjese que sí. Como como")
+(Escribe aquí el testimonio editado en primera persona. El texto debe ser fluido, continuo y fácil de leer, eliminando las muletillas y repeticiones según las reglas de edición. Integra únicamente lo que el testigo narró sobre los hechos, usando su propio vocabulario y ejemplos concretos.)
 
 **Cierre**
-(Sintetiza el estado actual del testigo en relación con los hechos y con {{ safe(client) or "la persona" }} si corresponde.)
+(Sintetiza en una o dos frases el estado actual del testigo o su percepción final sobre los hechos y sobre {{ safe(client) or "la persona" }}, si corresponde.)
 
 **DUDAS PENDIENTES (si aplica)**
 - [minuto]: “cita literal confusa o inaudible”
