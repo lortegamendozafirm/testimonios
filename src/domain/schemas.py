@@ -2,7 +2,36 @@
 from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 from typing import Optional, Dict, Any, Literal
 
+# --- 1. Configuración de Callback para Sheets ---
+class SheetCallbackConfig(BaseModel):
+    """Configuración para escribir el resultado en Google Sheets"""
+    spreadsheet_id: str = Field(..., description="ID de la hoja de cálculo")
+    sheet_name: str = Field(default="Hoja 1", description="Nombre de la pestaña")
+    row_index: int = Field(..., description="Fila donde se escribirá el resultado")
+    
+    # Columnas específicas para este servicio
+    testimony_doc_col: Optional[str] = Field(None, description="Columna para el link del Testimonio (ej: 'H')")
+    status_col: Optional[str] = Field(None, description="Columna para status (ej: 'J')")
 
+# --- 2. Estructuras para el Webhook (Input del Transcriptor) ---
+class WebhookMetadata(BaseModel):
+    """Datos que viajan dentro del campo 'metadata' del webhook del Transcriptor"""
+    output_doc_id: str
+    client_name: Optional[str] = None
+    witness_name: Optional[str] = None
+    context: str = "Witness"
+    # Aquí recibimos la configuración de sheet para pasarla al proceso interno
+    sheet_callback: Optional[SheetCallbackConfig] = None 
+
+class TranscriptionWebhookRequest(BaseModel):
+    """Payload estándar que envía el servicio de Transcripción al terminar"""
+    transcription_doc_id: str
+    doc_url: str
+    case_id: str
+    status: str
+    metadata: WebhookMetadata 
+
+# --- 3. Request Principal (Actualizado) ---
 class TestimonyRequest(BaseModel):
     # Identificación y contexto
     case_id: str = Field(..., description="ID del caso (obligatorio).")
@@ -11,51 +40,36 @@ class TestimonyRequest(BaseModel):
         None, description="Idioma de salida. Si falta, se usa settings.default_language."
     )
 
-    # (Opcionales, pero usados por el prompt/meta)
     client: Optional[str] = Field(None, description="Nombre del cliente (opcional).")
     witness: Optional[str] = Field(None, description="Nombre del testigo (opcional).")
 
-    # Fuente (debe venir al menos una)
-    raw_text: Optional[str] = Field(
-        None, description="Texto literal de la transcripción (prioridad más alta)."
-    )
-    transcription_doc_id: Optional[str] = Field(
-        None, description="ID de Google Doc que contiene la transcripción."
-    )
-    transcription_link: Optional[HttpUrl] = Field(
-        None, description="Link de Google Doc; se extrae el ID automáticamente."
-    )
+    # Fuente
+    raw_text: Optional[str] = Field(None)
+    transcription_doc_id: Optional[str] = Field(None)
+    transcription_link: Optional[HttpUrl] = Field(None)
 
-    # ✅ Destino (obligatorio, ya no hay defaults ni creación de Docs)
-    output_doc_id: str = Field(
-        ...,
-        description=(
-            "ID del Google Doc de salida (YA compartido con la Service Account). "
-            "Este servicio NO crea documentos ni usa valores por omisión."
-        ),
-    )
+    # Destino
+    output_doc_id: str = Field(..., description="ID del Google Doc de salida.")
 
     # Extras
-    extra: Optional[Dict[str, Any]] = Field(
-        default=None, description="Campos libres adicionales (se pasan al prompt/meta)."
-    )
-    request_id: Optional[str] = Field(
-        default=None, description="ID de request para trazabilidad."
+    extra: Optional[Dict[str, Any]] = Field(default=None)
+    request_id: Optional[str] = Field(default=None)
+
+    # ✅ NUEVO: Campo para recibir la configuración del Callback
+    sheet_callback: Optional[SheetCallbackConfig] = Field(
+        None, 
+        description="Si se incluye, se actualizará la Google Sheet al finalizar."
     )
 
-    # Permite llaves adicionales por compatibilidad hacia atrás
     model_config = {"extra": "allow"}
 
-    # --- Validaciones ---
-
+    # --- Validaciones (Sin cambios) ---
     @field_validator("output_doc_id", mode="before")
     @classmethod
     def _strip_and_require_output(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
+        if v is None: return v
         s = str(v).strip()
-        if not s:
-            raise ValueError("output_doc_id no puede ser vacío.")
+        if not s: raise ValueError("output_doc_id no puede ser vacío.")
         return s
 
     @model_validator(mode="after")
@@ -65,7 +79,6 @@ class TestimonyRequest(BaseModel):
                 "Debes enviar una fuente: 'raw_text' o 'transcription_doc_id' o 'transcription_link'."
             )
         return self
-
 
 class TestimonyResponse(BaseModel):
     status: str
